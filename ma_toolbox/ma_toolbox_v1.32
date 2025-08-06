@@ -1,0 +1,247 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © FR33FA11
+
+//@version=6
+//  ,------.,------. ,----. ,----. ,------. ,---.   ,--. ,--.
+//  |  .---'|  .--. ''.-.  |'.-.  ||  .---'/  O  \ /   |/   |
+//  |  `--, |  '--'.'  .' <   .' < |  `--,|  .-.  |`|  |`|  |
+//  |  |`   |  |\  \ /'-'  |/'-'  ||  |`  |  | |  | |  | |  |
+//  `--'    `--' '--'`----' `----' `--'   `--' `--' `--' `--'
+//         ,--.   ,--. ,-----.,--.   ,--.,--.,--.  ,--. ,----.            
+//         |   `.'   |'  .-.  '\  `.'  / |  ||  ,'.|  |'  .-./            
+//         |  |'.'|  ||  | |  | \     /  |  ||  |' '  ||  | .---.         
+//         |  |   |  |'  '-'  '  \   /   |  ||  | `   |'  '--'  |         
+//         `--'   `--' `-----'    `-'    `--'`--'  `--' `------'          
+//                  ,---.,--.   ,--.,------.,------.   ,---.   ,----.   ,------. 
+//                 /  O  \\  `.'  / |  .---'|  .--. ' /  O  \ '  .-./   |  .---' 
+//                |  .-.  |\     /  |  `--, |  '--'.'|  .-.  ||  | .---.|  `--,  
+//                |  | |  | \   /   |  `---.|  |\  \ |  | |  |'  '--'  ||  `---. 
+//                `--' `--'  `-'    `------'`--' '--'`--' `--' `------' `------' 
+//                ,--------. ,-----.  ,-----. ,--.   ,-----.   ,-----.,--.   ,--.
+//                '--.  .--''  .-.  ''  .-.  '|  |   |  |) /_ '  .-.  '\  `.'  / 
+//                   |  |   |  | |  ||  | |  ||  |   |  .-.  \|  | |  | .'    \  
+//                   |  |   '  '-'  ''  '-'  '|  '--.|  '--' /'  '-'  '/  .'.  \ 
+//                   `--'    `-----'  `-----' `-----'`------'  `-----''--'   '--'
+//                            ,--.    ,----.  ,---.                               
+//                 ,--.  ,--./   |    '.-.  |'.-.  \                              
+//                  \  `'  / `|  |      .' <  .-' .'                              
+//                   \    /   |  |.--./'-'  |/   '-.                              
+//                    `--'    `--''--'`----' '-----'       
+//                    _   _   _ _____ ___  _     _______     _______ _     ____  
+//                   / \ | | | |_   _/ _ \| |   | ____\ \   / / ____| |   / ___| 
+//                  / _ \| | | | | || | | | |   |  _|  \ \ / /|  _| | |   \___ \ 
+//                 / ___ \ |_| | | || |_| | |___| |___  \ V / | |___| |___ ___) |
+//                /_/   \_\___/  |_| \___/|_____|_____|  \_/  |_____|_____|____/ 
+
+// Useful links init:
+// v6 ref:
+// https://www.tradingview.com/pine-script-reference/v6/
+
+indicator("dK: autolevels v0.1.32  [Mandem Edition]", "autolvl", overlay=true, max_lines_count=500)
+
+var line[] allLines = array.new_line()    // Starts empty, persists  
+var label[] allLabels = array.new_label() // Same here  
+
+// ———— User Inputs ———— //
+xPercent = input.float(1.0, "Max Distance from Price (%)", minval=0.1, maxval=50.0, tooltip="Only show MAs within X% of price")
+flatSensitivity = input.float(0.1, "Flat Trend Threshold (%)", minval=0.01, maxval=0.5, tooltip="How much MA must move to be ▲/▼ (not ~)") / 100
+show15 = input.bool(false, 'm15', 'Show 15 minute MAs')
+show60 = input.bool(false, 'H1', 'Show 60 minute MAs')
+showH4 = input.bool(true, 'H4', 'Show H4 MAs')
+showD1 = input.bool(true, 'D1', 'Show 1 day MAs')
+
+
+// ———— Mandem's MA Library (Pine Script compliant) ———— //
+maLabelList = array.from("D1_ema_13", "D1_sma_100", "D1_ema_200", "D1_sma_300", "H4_ema_13", "H4_sma_100", "H4_ema_200", "H4_sma_300", "H1_ema_13", "H1_sma_100", "H1_ema_200", "H1_sma_300", "m30_ema_13", "m30_sma_100", "m30_ema_200", "m30_sma_300", "m15_ema_13", "m15_sma_100", "m15_ema_200", "m15_sma_300", "W_ema_13")
+
+// ———— Peng MA Colors by Length (Mandem Style) ———— //
+// getMaColor(length) =>
+ema13_col = #00a756 // Reach for the Lasers Green (Unlucky for bears)
+sma100_col = #2962FF // Neon Blue (100 ting)
+ema200_col = color.rgb(122, 18, 18) // Rasclaart Red (Snithches get 200 stitches fam)
+sma300_col = color.rgb(255, 0, 76) // Pussy Pink (300 big bois)
+// Purple Haze (300 big bois)
+
+getMaColor(length) =>
+    col = color.rgb(0, 0, 0)  // Default black
+    if length == 13
+        col := ema13_col
+    else if length == 100
+        col := sma100_col
+    else if length == 200
+        col := ema200_col
+    else if length == 300
+        col := sma300_col
+    col
+
+//
+// ———— Trend Detection (Smart Flat Zone) ———— //
+getTrendIcon(maValue) =>
+    float delta = math.abs(maValue - maValue[1]) / maValue
+    if delta <= flatSensitivity
+        "~"
+    else
+        maValue > maValue[1] ? "▲" : "▼"
+
+//
+// ———— Check within range init ———— //
+withinRange(value, pc) =>
+    math.abs(close[1] - value) / close[1] * 100 <= pc
+
+//
+// ———— Main Execution (Mandem Flow) ———— //
+D1_ema_13 = showD1 ? request.security(syminfo.tickerid, '1D', ta.ema(close, 13)) : 0
+D1_sma_100 = showD1 ? request.security(syminfo.tickerid, '1D', ta.sma(close, 100)) : 0
+D1_ema_200 = showD1 ? request.security(syminfo.tickerid, '1D', ta.ema(close, 200)) : 0
+D1_sma_300 = showD1 ? request.security(syminfo.tickerid, '1D', ta.sma(close, 300)) : 0
+H4_ema_13 = showH4 ? request.security(syminfo.tickerid, '240', ta.ema(close, 13)) : 0
+H4_sma_100 = showH4 ? request.security(syminfo.tickerid, '240', ta.sma(close, 100)) : 0
+H4_ema_200 = showH4 ? request.security(syminfo.tickerid, '240', ta.ema(close, 200)) : 0
+H4_sma_300 = showH4 ? request.security(syminfo.tickerid, '240', ta.sma(close, 300)) : 0
+H1_ema_13 = show60 ? request.security(syminfo.tickerid, '60', ta.ema(close, 13)) : 0
+H1_sma_100 = show60 ? request.security(syminfo.tickerid, '60', ta.sma(close, 100)) : 0
+H1_ema_200 = show60 ? request.security(syminfo.tickerid, '60', ta.ema(close, 200)) : 0
+H1_sma_300 = show60 ? request.security(syminfo.tickerid, '60', ta.sma(close, 300)) : 0
+m30_ema_13 = show60 ? request.security(syminfo.tickerid, '30', ta.ema(close, 13)) : 0
+m30_sma_100 = show60 ? request.security(syminfo.tickerid, '30', ta.sma(close, 100)) : 0
+m30_ema_200 = show60 ? request.security(syminfo.tickerid, '30', ta.ema(close, 200)) : 0
+m30_sma_300 = show60 ? request.security(syminfo.tickerid, '30', ta.sma(close, 300)) : 0
+m15_ema_13 = show15 ? request.security(syminfo.tickerid, '15', ta.ema(close, 13)) : 0
+m15_sma_100 = show15 ? request.security(syminfo.tickerid, '15', ta.sma(close, 100)) : 0
+m15_ema_200 = show15 ? request.security(syminfo.tickerid, '15', ta.ema(close, 200)) : 0 // = h4 ema12.5
+m15_sma_300 = show15 ? request.security(syminfo.tickerid, '15', ta.sma(close, 300)) : 0
+W_ema_13 = request.security(syminfo.tickerid, 'W', ta.ema(close, 13))
+
+maList = array.new<float>()
+array.push(maList, D1_ema_13)
+array.push(maList, D1_sma_100)
+array.push(maList, D1_ema_200)
+array.push(maList, D1_sma_300)
+array.push(maList, H4_ema_13)
+array.push(maList, H4_sma_100)
+array.push(maList, H4_ema_200)
+array.push(maList, H4_sma_300)
+array.push(maList, H1_ema_13)
+array.push(maList, H1_sma_100)
+array.push(maList, H1_ema_200)
+array.push(maList, H1_sma_300)
+array.push(maList, m30_ema_13)
+array.push(maList, m30_sma_100)
+array.push(maList, m30_ema_200)
+array.push(maList, m30_sma_300)
+array.push(maList, m15_ema_13)
+array.push(maList, m15_sma_100)
+array.push(maList, m15_ema_200)
+array.push(maList, m15_sma_300)
+array.push(maList, W_ema_13)
+
+maLenList = array.from(13, 100, 200, 300, 13, 100, 200, 300, 13, 100, 200, 300, 13, 100, 200, 300, 13, 100, 200, 300, 13)
+
+
+if barstate.islast
+    // Mandem cleanup crew - FULLY bulletproof
+    if not na(allLines) and array.size(allLines) > 0
+        for i = 0 to array.size(allLines) - 1
+            line.delete(array.get(allLines, i))
+
+    if not na(allLabels) and array.size(allLabels) > 0
+        for i = 0 to array.size(allLabels) - 1
+            label.delete(array.get(allLabels, i))
+
+    // Reset arrays for new levels (safe even if empty/na)
+    allLines := array.new_line()   // Force re-init
+    allLabels := array.new_label() // Force re-init
+
+    for i = 0 to array.size(maList) - 1
+        maValue = array.get(maList, i)
+        
+        trendIcon = getTrendIcon(maValue)
+
+        // Plotting
+        if withinRange(maValue, xPercent)
+            lineColor = getMaColor(array.get(maLenList, i))
+
+            labelText = '' + array.get(maLabelList, i) + '  ' + trendIcon
+            
+            currentLine = line.new(bar_index + 1, maValue, bar_index + 5, maValue, color=lineColor, width=1)
+            currentLabel = label.new(bar_index + 7, maValue, text=labelText, color=lineColor, style=label.style_none, textcolor=#e7e7e7d2, size=size.small, textalign=text.align_left)
+
+            // Store them for cleanup later  
+            array.push(allLines, currentLine)  
+            array.push(allLabels, currentLabel)  
+// indicator(title="Fruity MAs", shorttitle="FMAs", overlay=true)
+// len_1 = input.int(13, minval=1, title="H4 EMA 200 Length")
+// len_2 = input.int(78, minval=1, title="Length")
+// len_3 = input.int(100, minval=1, title="Length")
+// len_4 = input.int(200, minval=1, title="Length")
+// len_5 = input.int(300, minval=1, title="Length")
+// len_6 = input.int(33, minval=1, title="Length")
+// src = input(close, title="Source")
+// ma_1 = ta.ema(src, len_1)
+// ma_2 = ta.ema(src, len_2)
+// ma_3 = ta.sma(src, len_3)
+// ma_4 = ta.ema(src, len_4)
+// ma_5 = ta.sma(src, len_5)
+// ma_6 = ta.ema(src, len_6)
+
+// plot(ma_1, title="EMA", color=#00914d)
+// plot(ma_2, title="EMA", color=color.rgb(88, 14, 184))
+// plot(ma_3, title="EMA", color=color.rgb(201, 181, 0))
+// plot(ma_4, title="EMA", color=color.rgb(0, 79, 168))
+// plot(ma_5, title="EMA", color=#f3214f)
+// plot(ma_6, title="EMA", color=color.rgb(71, 80, 85))
+
+// var x_1 = bar_index - 5
+// var x_2 = bar_index + 5
+// h4_ema_13_y = ma_1[0]
+// line.new(x_1, h4_ema_13_y, x_2, h4_ema_13_y, xloc.bar_index, extend.none, #00914d, line.style_solid, 2)
+
+
+
+// Smoothing MA inputs
+// GRP = "Smoothing"
+// TT_BB = "Only applies when 'SMA + Bollinger Bands' is selected. Determines the distance between the SMA and the bands."
+// maTypeInput = input.string("None", "Type", options = ["None", "SMA", "SMA + Bollinger Bands", "EMA", "SMMA (RMA)", "WMA", "VWMA"], group = GRP, display = display.data_window)
+// maLengthInput = input.int(14, "Length", group = GRP, display = display.data_window)
+// bbMultInput = input.float(2.0, "BB StdDev", minval = 0.001, maxval = 50, step = 0.5, tooltip = TT_BB, group = GRP, display = display.data_window)
+// var enableMA = maTypeInput != "None"
+// var isBB = maTypeInput == "SMA + Bollinger Bands"
+
+// Smoothing MA Calculation
+// ma(source, length, MAtype) =>
+// 	switch MAtype
+// 		"SMA"                   => ta.sma(source, length)
+// 		"SMA + Bollinger Bands" => ta.sma(source, length)
+// 		"EMA"                   => ta.ema(source, length)
+// 		"SMMA (RMA)"            => ta.rma(source, length)
+// 		"WMA"                   => ta.wma(source, length)
+// 		"VWMA"                  => ta.vwma(source, length)
+
+// // Smoothing MA plots
+// smoothingMA = enableMA ? ma(out, maLengthInput, maTypeInput) : na
+// smoothingStDev = isBB ? ta.stdev(out, maLengthInput) * bbMultInput : na
+// plot(smoothingMA, "EMA-based MA", color=color.yellow, display = enableMA ? display.all : display.none, editable = enableMA)
+// bbUpperBand = plot(smoothingMA + smoothingStDev, title = "Upper Bollinger Band", color=color.green, display = isBB ? display.all : display.none, editable = isBB)
+// bbLowerBand = plot(smoothingMA - smoothingStDev, title = "Lower Bollinger Band", color=color.green, display = isBB ? display.all : display.none, editable = isBB)
+// fill(bbUpperBand, bbLowerBand, color= isBB ? color.new(color.green, 90) : na, title="Bollinger Bands Background Fill", display = isBB ? display.all : display.none, editable = isBB)
+
+
+//░░░░░░░░░░░░░░░░░░▒▒░░░░▓████▒░░░░░░░░▒█▓░░░░▓██████████▓░▒█▒░░░░░░██▓▓▓▓▓▓▓██▓▓▓▓▓▓▓▓██▓░░░░░░░░░░░░░░░░
+//░░▒▓▓░░░░░░░░░▒████████▒░▓██▒░░░░░░░░░  ░░░░██████████████░░░░░░░░███▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓███████▒░░░░░░░░░░░░░
+//░░▓██▓░░░░░▒███████▒░  ██▓▓▓▓▓▓▒░██▓▒░░░░▓▓▓███▓░░░░░░▓████░░▒▓▓▒░░▒█▓░▒▒▒█▓▓▓▓▓▓██▓██████████▓▓█▓░░░░░░░
+//░░░░░░░░▓███▒   ▒█████▒ ▓██████   ▒███████▒░█▒░████████░▒█▒  ▒████▓░██▒████ ▒█▓█ ▒███▒░█▒  ▒████▒░█░░░░░░
+//░░░░▓█▒░░▒█████▓░    ▓██░     ░████░      ██▓██░      ░██████▒      ▒███  ▒██▒ ██▓   █████▓▒   ░██▒█░░░░░
+//░░▒█ ███▒░           ░           ▓▓        ░█░          █▒          ░██      ██▒      ▒██       ▓█▒█▒░░░░
+//░░▓█ █▓                           █░        ▒█    ░     ▓▒         ▒██▒      ██░       ▓▓       ██▒█░░░░░
+//░ ▓█ ██                 ▒████▒    ▒██████   ░███████▓   █▓    ▓██████▓       ▒█▓▓█     ████     █▓▒▒░░░░░
+//░░▒█▒▓█░     ▓██████     ████▓    ▓█████    ███████▓   ▒██    ███████    ▓    ████     ████    ▓█▒▒░░░░░░
+//░░░██▒█▓     ███████▒    ▓▓▒░    ▒███░    ░█████▓     ▓███        ░█▒   ▒█░   ███▓    ░███▒    ██░▓▒░░░░░
+//░░░▓█░██     ▒░     ▒           █████▒      █████▒░    ░██░       ▒█    ██▓   ▒██▒    ▒███░    ██░▒▓▒░░░░
+//░░░░█▒██▒          ░▒          ██████████░   ▓██████▓   ░█▒    ▒███▒          ░██▒    ████░   ▒█▒ ░█░░░░░
+//░░░░▓█▒██        ░▒█▓░   ▒█    ▒█░▒███████   ░██████▓   ░█▓   ▒████           ░██▒    ████░   ▓█░▒██▒░░░░
+//░░░░░█▒██▒    ░██████▒░ ░▓██░ ▒▓░  ░▒███▓░   ▓█░▒▓▒░    ▒██  ░▒███▒   ▒████░ ░▓██▒    ▒▒██░  ░▓████░▒█░░░
+//░░░░░▓▓▓██▒░░░▒███▒██▒░▒▒▓███▒░▒▓▓░░░░░░░░░░▒█▒░░░░░░░░▒███░░░▒███▒░▒▒█████▒░█▒▒░░░░▒░░▒██▒░░░░░░▒██ █▒░░
+//░░░░░░█▒██▓▒▒▒▒███ ██▒▒▒▒█████▒▒▒▓█▓▒▒▒▒▒▒▒███▓▒▒▒▒▒▒▒████▓▒▒▒▒███▒▒▒▓█████▓▒█▒▒▒▒▒▒▒▒▒▒█▓▒▒▒▒▒▒▒▒██ █▒░░
+//░░░▒░░█▒███▓▒▒▒███ ██▓▓▓▓███████████████████████████████▓███████████████▒███▓█████████████████▓▓▓██░▓█░░░
+//░░░▓▓▒██░███▓▓▓███ ████████████████████████████████████░▒██████████████▓▒█████████████████████████░▓█░░░░
+//░░░░░▒██▓▒████████ ██████▒▒░ ░░▓░█░░░░░▒██░░░░▒█▒░███▓ ░▒▓▒▓██▒▒░█▓░ ░░  ▒▒█▓▒██▓█▒██████▓▒██▓▒▒░▒█▓░░░░░
